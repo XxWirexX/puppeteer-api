@@ -1,51 +1,64 @@
-const express = require('express');
 const puppeteer = require('puppeteer');
-
+const express = require('express');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-app.get('/get-m3u8', async (req, res) => {
+const PORT = process.env.PORT || 8000;
+
+app.get('/', (req, res) => {
+  res.send('🎬 API Puppeteer pour extraire les liens vidéo Vidmoly');
+});
+
+app.get('/extract', async (req, res) => {
   const videoUrl = req.query.url;
-  if (!videoUrl) return res.status(400).send("❌ Paramètre ?url= requis.");
 
-  console.log('🎥 Extraction depuis :', videoUrl);
+  if (!videoUrl) {
+    return res.status(400).json({ error: 'URL manquante. Utilise ?url=https://...' });
+  }
+
+  console.log(`🎥 Extraction depuis : ${videoUrl}`);
 
   try {
     const browser = await puppeteer.launch({
-      headless: true,
+      headless: 'new', // ou true si erreur
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
+
     const page = await browser.newPage();
 
-    let found = null;
+    let videoLinks = [];
 
+    // Intercepte les requêtes
     page.on('response', async (response) => {
       const url = response.url();
-      if (url.includes('.m3u8')) {
-        found = url;
+      if (url.includes('.m3u8') || url.includes('.mp4')) {
+        console.log('✅ Lien vidéo détecté :', url);
+        videoLinks.push(url);
       }
     });
 
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      const type = req.resourceType();
-      if (['image', 'stylesheet', 'font'].includes(type)) req.abort();
-      else req.continue();
+      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
     });
 
     await page.goto(videoUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(10000); // attendre que les requêtes soient faites
+
     await browser.close();
 
-    if (found) {
-      res.send({ m3u8: found });
-    } else {
-      res.status(404).send("❌ Aucun lien .m3u8 trouvé.");
+    if (videoLinks.length === 0) {
+      return res.status(404).json({ error: 'Aucun lien vidéo trouvé' });
     }
+
+    res.json({ links: videoLinks });
 
   } catch (err) {
     console.error('Erreur Puppeteer :', err);
-    res.status(500).send("❌ Erreur interne.");
+    res.status(500).json({ error: 'Erreur lors de l’extraction', details: err.toString() });
   }
 });
 
