@@ -19,23 +19,18 @@ app.get('/extract', async (req, res) => {
 
   try {
     const browser = await puppeteer.launch({
-      headless: 'new', // ou true si erreur
+      headless: 'new',
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
     const page = await browser.newPage();
 
-    let videoLinks = [];
+    // Simule un vrai navigateur (important pour éviter les protections)
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    );
 
-    // Intercepte les requêtes
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes('.m3u8') || url.includes('.mp4')) {
-        console.log('✅ Lien vidéo détecté :', url);
-        videoLinks.push(url);
-      }
-    });
-
+    // Désactive les images et autres éléments inutiles
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
@@ -45,8 +40,10 @@ app.get('/extract', async (req, res) => {
       }
     });
 
-    await page.goto(videoUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-    await page.waitForTimeout(10000); // attendre que les requêtes soient faites
+    // Navigation avec un timeout plus long
+    await page.goto(videoUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForTimeout(12000);
+
 
     await browser.close();
 
