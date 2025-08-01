@@ -1,61 +1,77 @@
-const puppeteer = require('puppeteer');
 const express = require('express');
+const puppeteer = require('puppeteer');
+
 const app = express();
-
 const PORT = process.env.PORT || 8000;
-
-app.get('/', (req, res) => {
-  res.send('🎬 API Puppeteer pour extraire les liens vidéo Vidmoly');
-});
 
 app.get('/extract', async (req, res) => {
   const videoUrl = req.query.url;
 
   if (!videoUrl) {
-    return res.status(400).json({ error: 'URL manquante. Utilise ?url=https://...' });
+    return res.status(400).json({ error: 'Paramètre "url" manquant.' });
   }
 
   console.log(`🎥 Extraction depuis : ${videoUrl}`);
 
+  let browser;
+
   try {
-    const browser = await puppeteer.launch({
+    browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage'
+      ]
     });
 
     const page = await browser.newPage();
 
-    // Simule un vrai navigateur (important pour éviter les protections)
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
     );
 
-    // Désactive les images et autres éléments inutiles
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+      const type = req.resourceType();
+      if (['image', 'stylesheet', 'font'].includes(type)) {
         req.abort();
       } else {
         req.continue();
       }
     });
 
-    // Navigation avec un timeout plus long
-    await page.goto(videoUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-    await page.waitForTimeout(12000);
+    let foundVideoUrl = null;
 
+    page.on('response', async (response) => {
+      const resUrl = response.url();
+      if (resUrl.includes('.m3u8') || resUrl.includes('.mp4')) {
+        if (!foundVideoUrl) {
+          foundVideoUrl = resUrl;
+          console.log('✅ Lien vidéo trouvé :', foundVideoUrl);
+        }
+      }
+    });
+
+    await page.goto(videoUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 90000
+    });
+
+    await page.waitForTimeout(15000); // Donne le temps aux requêtes
 
     await browser.close();
 
-    if (videoLinks.length === 0) {
-      return res.status(404).json({ error: 'Aucun lien vidéo trouvé' });
+    if (foundVideoUrl) {
+      return res.json({ video: foundVideoUrl });
+    } else {
+      return res.status(404).json({ error: 'Aucun lien .m3u8 ou .mp4 détecté.' });
     }
-
-    res.json({ links: videoLinks });
-
   } catch (err) {
+    if (browser) await browser.close();
     console.error('Erreur Puppeteer :', err);
-    res.status(500).json({ error: 'Erreur lors de l’extraction', details: err.toString() });
+    return res.status(500).json({ error: 'Erreur Puppeteer', details: err.toString() });
   }
 });
 
